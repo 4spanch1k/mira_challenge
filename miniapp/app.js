@@ -195,7 +195,6 @@ function selectPrompt(promptId) {
   detailDescription.textContent = prompt.short;
   promptPreview.textContent = prompt.prompt;
   haptic();
-  sendData({ action: "select_prompt", prompt_id: promptId });
   showScreen("detail");
 }
 
