@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 *.db
 .playwright-cli/
+miniapp/.vercel/
