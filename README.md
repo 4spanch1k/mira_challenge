@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="./assets/avatar.png" width="140" alt="Mira 2-Minute Challenge Bot Avatar" />
+<img src="./assets/avatar.png" width="140" alt="Мира Челлендж Avatar" />
 
-# 🚀 Mira 2-Minute Challenge Bot
+# 🚀 Мира Челлендж
 
 **Telegram-бот для Mira Growth Hackathon, который превращает обычную реферальную ссылку в интерактивный челлендж с быстрым AI-результатом.**
 
@@ -245,7 +245,7 @@ Leaderboard нужен не ради сложной геймификации, а
 ## 🗣️ Пример поста для запуска
 
 ```text
-🚀 Запускаем Mira 2-Minute Challenge
+🚀 Запускаем Мира Челлендж
 
 Суть простая: выбираешь задачу, получаешь готовый промпт, открываешь Mira и за 2 минуты получаешь результат.
 
