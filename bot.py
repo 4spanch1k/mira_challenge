@@ -14,13 +14,22 @@ from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    WebAppInfo,
+)
 from config import settings
 
 BOT_TOKEN = settings.bot_token
 MIRA_LINK = settings.mira_link
 DB_PATH = settings.db_path
 ADMIN_IDS = settings.admin_ids
+WEBAPP_URL = settings.webapp_url
 
 logging.basicConfig(level=logging.INFO)
 router = Router()
@@ -236,8 +245,8 @@ async def get_stats() -> dict:
         stats = {}
         queries = {
             "users": "SELECT COUNT(*) FROM users",
-            "prompt_sent": "SELECT COUNT(*) FROM events WHERE event = 'prompt_sent'",
-            "done": "SELECT COUNT(*) FROM events WHERE event = 'done_clicked'",
+            "prompt_sent": "SELECT COUNT(*) FROM events WHERE event IN ('prompt_sent', 'prompt_sent_from_webapp')",
+            "done": "SELECT COUNT(*) FROM events WHERE event IN ('done_clicked', 'done_clicked_from_webapp')",
             "screenshots": "SELECT COUNT(*) FROM submissions",
         }
         for key, query in queries.items():
@@ -249,7 +258,7 @@ async def get_stats() -> dict:
             """
             SELECT prompt_id, COUNT(*)
             FROM events
-            WHERE event = 'prompt_sent'
+            WHERE event IN ('prompt_sent', 'prompt_sent_from_webapp')
             GROUP BY prompt_id
             ORDER BY COUNT(*) DESC
             """
@@ -284,7 +293,7 @@ async def get_leaderboard(limit: int = 10) -> list[tuple]:
             LEFT JOIN (
                 SELECT telegram_id, COUNT(*) AS done_count
                 FROM events
-                WHERE event = 'done_clicked'
+                WHERE event IN ('done_clicked', 'done_clicked_from_webapp')
                 GROUP BY telegram_id
             ) done ON done.telegram_id = u.telegram_id
             LEFT JOIN (
@@ -311,6 +320,18 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def challenge_reply_keyboard() -> ReplyKeyboardMarkup:
+    first_row = [KeyboardButton(text="🚀 Открыть Challenge", web_app=WebAppInfo(url=WEBAPP_URL))]
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            first_row,
+            [KeyboardButton(text="🏆 Leaderboard"), KeyboardButton(text="📊 Статистика")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
 def prompt_keyboard(prompt_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -334,6 +355,51 @@ def after_done_keyboard(prompt_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def prompt_message_text(prompt_id: str) -> str:
+    data = PROMPTS[prompt_id]
+    prompt_text = html.escape(data["prompt"])
+    return (
+        f"<b>{html.escape(data['title'])}</b>\n\n"
+        f"{html.escape(data['short'])}\n\n"
+        "Скопируй промпт ниже, открой Mira и вставь его туда 👇\n\n"
+        f"<pre>{prompt_text}</pre>\n\n"
+        "После результата вернись сюда и нажми «Я сделал»."
+    )
+
+
+async def send_prompt_message(message: Message, prompt_id: str) -> None:
+    await message.answer(prompt_message_text(prompt_id), reply_markup=prompt_keyboard(prompt_id))
+
+
+async def send_stats_message(message: Message, event_name: str = "stats_opened") -> None:
+    await upsert_user(message)
+    await add_event(message.from_user.id, event_name)
+    stats = await get_stats()
+    text = (
+        "📊 <b>Статистика челленджа</b>\n\n"
+        f"Пользователей: <b>{stats['users']}</b>\n"
+        f"Выдано промптов: <b>{stats['prompt_sent']}</b>\n"
+        f"Нажали «Я сделал»: <b>{stats['done']}</b>\n"
+        f"Скринов загружено: <b>{stats['screenshots']}</b>"
+    )
+    await message.answer(text)
+
+
+async def send_leaderboard_message(message: Message, event_name: str = "leaderboard_opened") -> None:
+    await upsert_user(message)
+    await add_event(message.from_user.id, event_name)
+    rows = await get_leaderboard()
+    if not rows:
+        await message.answer("Пока leaderboard пустой. Будь первым.")
+        return
+    lines = ["🏆 <b>Leaderboard</b>\n"]
+    for index, row in enumerate(rows, start=1):
+        telegram_id, username, first_name, done_count, sub_count, points = row
+        name = f"@{username}" if username else (first_name or f"user_{telegram_id}")
+        lines.append(f"{index}. {html.escape(name)} — {points} баллов ({done_count} done, {sub_count} скринов)")
+    await message.answer("\n".join(lines))
+
+
 async def send_main_menu(message: Message) -> None:
     stats = await get_stats()
     text = (
@@ -343,6 +409,10 @@ async def send_main_menu(message: Message) -> None:
         f"Скринов в подборке: <b>{stats['screenshots']}</b>\n\n"
         "Выбирай задачу 👇"
     )
+    if WEBAPP_URL:
+        await message.answer(text, reply_markup=challenge_reply_keyboard())
+        await message.answer("Если Mini App не открылся, выбери задачу здесь:", reply_markup=main_menu_keyboard())
+        return
     await message.answer(text, reply_markup=main_menu_keyboard())
 
 
@@ -384,33 +454,12 @@ async def cmd_help(message: Message) -> None:
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message) -> None:
-    await upsert_user(message)
-    await add_event(message.from_user.id, "stats_opened")
-    stats = await get_stats()
-    text = (
-        "📊 <b>Статистика челленджа</b>\n\n"
-        f"Пользователей: <b>{stats['users']}</b>\n"
-        f"Выдано промптов: <b>{stats['prompt_sent']}</b>\n"
-        f"Нажали «Я сделал»: <b>{stats['done']}</b>\n"
-        f"Скринов загружено: <b>{stats['screenshots']}</b>"
-    )
-    await message.answer(text)
+    await send_stats_message(message)
 
 
 @router.message(Command("leaderboard"))
 async def cmd_leaderboard(message: Message) -> None:
-    await upsert_user(message)
-    await add_event(message.from_user.id, "leaderboard_opened")
-    rows = await get_leaderboard()
-    if not rows:
-        await message.answer("Пока leaderboard пустой. Будь первым.")
-        return
-    lines = ["🏆 <b>Leaderboard</b>\n"]
-    for index, row in enumerate(rows, start=1):
-        telegram_id, username, first_name, done_count, sub_count, points = row
-        name = f"@{username}" if username else (first_name or f"user_{telegram_id}")
-        lines.append(f"{index}. {html.escape(name)} — {points} баллов ({done_count} done, {sub_count} скринов)")
-    await message.answer("\n".join(lines))
+    await send_leaderboard_message(message)
 
 
 @router.message(Command("admin"))
@@ -497,15 +546,7 @@ async def cb_prompt(callback: CallbackQuery) -> None:
         await callback.answer("Промпт не найден", show_alert=True)
         return
     await add_event(callback.from_user.id, "prompt_sent", prompt_id)
-    prompt_text = html.escape(data["prompt"])
-    text = (
-        f"<b>{html.escape(data['title'])}</b>\n\n"
-        f"{html.escape(data['short'])}\n\n"
-        "Скопируй промпт ниже, открой Mira и вставь его туда 👇\n\n"
-        f"<pre>{prompt_text}</pre>\n\n"
-        "После результата вернись сюда и нажми «Я сделал»."
-    )
-    await callback.message.edit_text(text, reply_markup=prompt_keyboard(prompt_id))
+    await callback.message.edit_text(prompt_message_text(prompt_id), reply_markup=prompt_keyboard(prompt_id))
     await callback.answer()
 
 
@@ -591,6 +632,62 @@ async def handle_document_screenshot(message: Message, state: FSMContext) -> Non
 @router.message(UploadScreenshot.waiting_for_screenshot)
 async def handle_wrong_screenshot(message: Message) -> None:
     await message.answer("Нужно отправить именно скрин: фото или изображение.\n\nПросто прикрепи скрин ответа Mira.")
+
+
+@router.message(F.web_app_data)
+async def handle_web_app_data(message: Message, state: FSMContext) -> None:
+    await upsert_user(message)
+    try:
+        payload = json.loads(message.web_app_data.data)
+    except (TypeError, json.JSONDecodeError):
+        await message.answer("Не понял действие из Mini App. Нажми /start и попробуй ещё раз.")
+        return
+
+    action = payload.get("action")
+    prompt_id = payload.get("prompt_id")
+
+    if action in {"select_prompt", "done_clicked", "upload_requested"} and prompt_id not in PROMPTS:
+        await message.answer("Задача не найдена. Нажми /start и попробуй ещё раз.")
+        return
+
+    if action == "select_prompt":
+        await add_event(message.from_user.id, "prompt_sent_from_webapp", prompt_id)
+        await send_prompt_message(message, prompt_id)
+        return
+
+    if action == "done_clicked":
+        await add_event(message.from_user.id, "done_clicked_from_webapp", prompt_id)
+        await message.answer(
+            "✅ Результат засчитан. Хочешь попасть в подборку — отправь скрин.",
+            reply_markup=after_done_keyboard(prompt_id),
+        )
+        return
+
+    if action == "upload_requested":
+        await state.set_state(UploadScreenshot.waiting_for_screenshot)
+        await state.update_data(prompt_id=prompt_id)
+        await add_event(message.from_user.id, "upload_requested_from_webapp", prompt_id)
+        await message.answer(
+            "📸 Отправь сюда скрин результата из Mira.\n\n"
+            "Можно просто фото/скриншот. Если хочешь — добавь подпись, что именно сделал."
+        )
+        return
+
+    if action == "leaderboard_opened":
+        await send_leaderboard_message(message, "leaderboard_opened_from_webapp")
+        return
+
+    await message.answer("Неизвестное действие из Mini App. Нажми /start и попробуй ещё раз.")
+
+
+@router.message(F.text == "🏆 Leaderboard")
+async def text_leaderboard(message: Message) -> None:
+    await send_leaderboard_message(message)
+
+
+@router.message(F.text == "📊 Статистика")
+async def text_stats(message: Message) -> None:
+    await send_stats_message(message)
 
 
 @router.message()

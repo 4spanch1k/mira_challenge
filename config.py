@@ -22,6 +22,7 @@ class Settings:
     db_path: str
     admin_ids: set[int]
     bot_username: str
+    webapp_url: str
 
 
 def load_settings() -> Settings:
@@ -35,6 +36,7 @@ def load_settings() -> Settings:
         db_path=os.getenv("DB_PATH", "mira_challenge.db").strip(),
         admin_ids=_parse_admin_ids(os.getenv("ADMIN_IDS", "")),
         bot_username=os.getenv("BOT_USERNAME", "").strip(),
+        webapp_url=os.getenv("WEBAPP_URL", "").strip(),
     )
 
 

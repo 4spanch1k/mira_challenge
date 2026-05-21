@@ -63,6 +63,7 @@ leaderboard / подборка лучших
 ## ✨ Основные функции
 
 - ✅ Telegram-бот без Mini App, быстрый MVP;
+- ✅ Telegram Mini App на чистом HTML/CSS/JS;
 - ✅ 5 готовых сценариев использования Mira;
 - ✅ кнопка перехода в Mira по UTM/ref-ссылке;
 - ✅ фиксация действия «Я сделал»;
@@ -104,11 +105,19 @@ python-dotenv
 ```text
 mira_challenge_bot/
 ├── bot.py
+├── config.py
 ├── requirements.txt
 ├── .env.example
 ├── README.md
+├── miniapp/
+│   ├── index.html
+│   ├── style.css
+│   ├── app.js
+│   └── assets/
+│       └── avatar.png
 └── assets/
-    └── avatar.png
+    ├── avatar.png
+    └── mira-challenge-avatar.png
 ```
 
 ---
@@ -161,6 +170,7 @@ BOT_TOKEN=your_telegram_bot_token
 MIRA_LINK=https://t.me/Mira?start=your_ref_or_utm
 ADMIN_IDS=123456789
 BOT_USERNAME=your_bot_username
+WEBAPP_URL=https://your-miniapp-domain.com
 DB_PATH=mira_challenge.db
 ```
 
@@ -180,7 +190,49 @@ python bot.py
 | `MIRA_LINK` | персональная UTM/ref-ссылка на Mira |
 | `ADMIN_IDS` | Telegram ID админов через запятую |
 | `BOT_USERNAME` | username бота |
+| `WEBAPP_URL` | HTTPS-ссылка на Telegram Mini App |
 | `DB_PATH` | путь до SQLite-базы |
+
+---
+
+## 🛰️ Mini App
+
+Mini App лежит в папке `miniapp/` и работает как статический сайт без сборки:
+
+```bash
+cd miniapp
+python -m http.server 8000
+```
+
+Локально он откроется по адресу:
+
+```text
+http://localhost:8000
+```
+
+Для Telegram Mini App нужен публичный HTTPS URL. Самый быстрый вариант — задеплоить папку `miniapp/` на Vercel или Netlify и вставить полученный URL в `.env`:
+
+```env
+WEBAPP_URL=https://your-miniapp-domain.com
+```
+
+После этого `/start` покажет кнопку `🚀 Открыть Challenge`. Старые inline-кнопки выбора задач остаются ниже как fallback.
+
+### Деплой на Vercel
+
+```bash
+cd miniapp
+vercel
+```
+
+В настройках проекта на Vercel укажи корневой директорией `miniapp`, если деплоишь из всего репозитория.
+
+### Деплой на Netlify
+
+```bash
+cd miniapp
+netlify deploy --prod --dir .
+```
 
 ---
 

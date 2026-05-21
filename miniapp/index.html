@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#080812" />
+    <title>Mira 2-Minute Challenge</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23080712'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%238B5CF6'/%3E%3Cpath d='M20 34c5-11 19-11 24 0' fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="screen screen-active" id="home-screen" aria-labelledby="home-title">
+        <section class="hero">
+          <div class="avatar-frame" aria-hidden="true">
+            <img src="./assets/avatar.png" alt="" class="avatar-image" />
+          </div>
+          <p class="eyebrow">AI challenge</p>
+          <h1 id="home-title">Mira 2-Minute Challenge</h1>
+          <p class="subtitle">Выбери задачу, получи промпт и сделай результат в Mira за 2 минуты</p>
+        </section>
+
+        <section class="stats-grid" aria-label="Статистика">
+          <div class="stat-item">
+            <span>Уже сделали</span>
+            <strong>17</strong>
+          </div>
+          <div class="stat-item">
+            <span>Скринов</span>
+            <strong>8</strong>
+          </div>
+          <div class="stat-item">
+            <span>Result</span>
+            <strong>of the Day</strong>
+          </div>
+        </section>
+
+        <section class="task-list" id="task-list" aria-label="Задачи"></section>
+
+        <button class="ghost-button full-width" id="open-leaderboard" type="button">Лучшие результаты дня</button>
+      </main>
+
+      <main class="screen" id="detail-screen" aria-labelledby="detail-title">
+        <button class="back-button" id="detail-back" type="button" aria-label="Назад">Назад</button>
+        <section class="detail-head">
+          <p class="eyebrow" id="detail-kicker">Challenge task</p>
+          <h2 id="detail-title"></h2>
+          <p id="detail-description" class="subtitle"></p>
+        </section>
+        <article class="prompt-card">
+          <div class="prompt-card-head">
+            <span>Готовый промпт</span>
+            <span>2 min</span>
+          </div>
+          <pre id="prompt-preview"></pre>
+        </article>
+        <section class="action-grid" aria-label="Действия">
+          <button class="primary-button" id="copy-prompt" type="button">Скопировать промпт</button>
+          <button class="secondary-button" id="open-mira" type="button">Открыть Mira</button>
+          <button class="success-button" id="mark-done" type="button">Я сделал</button>
+          <button class="ghost-button" id="request-upload" type="button">Отправить скрин</button>
+        </section>
+      </main>
+
+      <main class="screen" id="success-screen" aria-labelledby="success-title">
+        <section class="success-panel">
+          <div class="success-mark" aria-hidden="true">✓</div>
+          <h2 id="success-title">Результат засчитан</h2>
+          <p class="subtitle">Хочешь попасть в подборку лучших — отправь скрин в бот</p>
+          <div class="action-grid">
+            <button class="primary-button" id="success-upload" type="button">Отправить скрин</button>
+            <button class="ghost-button" id="success-home" type="button">Другая задача</button>
+          </div>
+        </section>
+      </main>
+
+      <main class="screen" id="leaderboard-screen" aria-labelledby="leaderboard-title">
+        <button class="back-button" id="leaderboard-back" type="button" aria-label="Назад">Назад</button>
+        <section class="detail-head">
+          <p class="eyebrow">Leaderboard</p>
+          <h2 id="leaderboard-title">Лучшие результаты дня</h2>
+          <p class="subtitle">Демо-таблица для Mini App. Реальные данные можно подтянуть следующим этапом.</p>
+        </section>
+        <section class="leaderboard-list" aria-label="Лучшие пользователи">
+          <div class="leaderboard-row"><span>@user1</span><strong>12 баллов</strong></div>
+          <div class="leaderboard-row"><span>@user2</span><strong>9 баллов</strong></div>
+          <div class="leaderboard-row"><span>@user3</span><strong>7 баллов</strong></div>
+          <div class="leaderboard-row"><span>@user4</span><strong>6 баллов</strong></div>
+          <div class="leaderboard-row"><span>@user5</span><strong>5 баллов</strong></div>
+        </section>
+        <section class="result-card">
+          <span>Result of the Day</span>
+          <strong>Самый полезный скрин попадёт в подборку</strong>
+        </section>
+        <button class="primary-button full-width" id="refresh-leaderboard" type="button">Обновить в боте</button>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
