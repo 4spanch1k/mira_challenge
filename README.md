@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/avatar.png" width="140" alt="Мира Челлендж Avatar" />
+<img src="./assets/mira-challenge-avatar.png" width="140" alt="Мира Челлендж Avatar" />
 
 # 🚀 Мира Челлендж
 
