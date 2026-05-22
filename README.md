@@ -191,7 +191,14 @@ python bot.py
 | `ADMIN_IDS` | Telegram ID админов через запятую |
 | `BOT_USERNAME` | username бота |
 | `WEBAPP_URL` | HTTPS-ссылка на Telegram Mini App |
+| `GROQ_API_KEY` | ключ Groq для проверки реальности скринов |
+| `GROQ_VISION_MODEL` | vision-модель Groq |
+| `SUPABASE_URL` | URL проекта Supabase |
+| `SUPABASE_SERVICE_ROLE_KEY` | service role key для серверной записи в Supabase |
+| `SUPABASE_STORAGE_BUCKET` | bucket для скринов, по умолчанию `screenshots` |
 | `DB_PATH` | путь до SQLite-базы |
+
+SQLite остаётся fallback-хранилищем. Если Supabase-переменные не заполнены, бот продолжит работать локально.
 
 ---
 
@@ -260,6 +267,37 @@ netlify deploy --prod --dir .
 - загрузку скрина;
 - статистику по источникам;
 - leaderboard.
+
+---
+
+## 🧠 Проверка скринов через Groq
+
+Когда пользователь отправляет скрин результата, бот скачивает изображение из Telegram и проверяет его через Groq Vision:
+
+- если скрин похож на реальный AI/Mira-результат по выбранной задаче — submission получает `status=accepted`;
+- если это случайный скрин, пустой экран или нерелевантная картинка — `status=rejected`;
+- leaderboard считает только `accepted` и старые `new` submissions.
+
+Для включения проверки заполни:
+
+```env
+GROQ_API_KEY=your_groq_api_key
+GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+```
+
+---
+
+## 🗄️ Supabase
+
+Схема лежит в [`supabase_schema.sql`](./supabase_schema.sql). Выполни её в Supabase SQL Editor, затем заполни:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SUPABASE_STORAGE_BUCKET=screenshots
+```
+
+Service role key используй только на сервере бота. Не добавляй его в Mini App и не коммить `.env`.
 
 > Важно: Telegram не сообщает боту, нажал ли пользователь внешнюю URL-кнопку.  
 > Поэтому клики в Mira считаются через UTM/ref-ссылку, а бот фиксирует внутренние действия пользователя.

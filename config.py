@@ -23,6 +23,11 @@ class Settings:
     admin_ids: set[int]
     bot_username: str
     webapp_url: str
+    groq_api_key: str
+    groq_vision_model: str
+    supabase_url: str
+    supabase_service_role_key: str
+    supabase_storage_bucket: str
 
 
 def load_settings() -> Settings:
@@ -37,6 +42,11 @@ def load_settings() -> Settings:
         admin_ids=_parse_admin_ids(os.getenv("ADMIN_IDS", "")),
         bot_username=os.getenv("BOT_USERNAME", "").strip(),
         webapp_url=os.getenv("WEBAPP_URL", "").strip(),
+        groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
+        groq_vision_model=os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct").strip(),
+        supabase_url=os.getenv("SUPABASE_URL", "").strip().rstrip("/"),
+        supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip(),
+        supabase_storage_bucket=os.getenv("SUPABASE_STORAGE_BUCKET", "screenshots").strip(),
     )
 
 

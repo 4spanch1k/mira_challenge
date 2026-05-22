@@ -1,11 +1,15 @@
 import asyncio
+import base64
 import html
 import json
 import logging
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
+from io import BytesIO
 from typing import Optional
 
 import aiosqlite
+import aiohttp
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -30,6 +34,11 @@ MIRA_LINK = settings.mira_link
 DB_PATH = settings.db_path
 ADMIN_IDS = settings.admin_ids
 WEBAPP_URL = settings.webapp_url
+GROQ_API_KEY = settings.groq_api_key
+GROQ_VISION_MODEL = settings.groq_vision_model
+SUPABASE_URL = settings.supabase_url
+SUPABASE_SERVICE_ROLE_KEY = settings.supabase_service_role_key
+SUPABASE_STORAGE_BUCKET = settings.supabase_storage_bucket
 
 logging.basicConfig(level=logging.INFO)
 router = Router()
@@ -139,7 +148,166 @@ class UploadScreenshot(StatesGroup):
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def supabase_enabled() -> bool:
+    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+
+
+async def supabase_request(method: str, path: str, *, json_body: Optional[dict | list] = None, data: Optional[bytes] = None, headers: Optional[dict] = None) -> Optional[dict | list]:
+    if not supabase_enabled():
+        return None
+
+    request_headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    }
+    if json_body is not None:
+        request_headers["Content-Type"] = "application/json"
+    request_headers.update(headers or {})
+
+    url = f"{SUPABASE_URL}{path}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.request(method, url, json=json_body, data=data, headers=request_headers, timeout=20) as response:
+                text = await response.text()
+                if response.status >= 400:
+                    logging.warning("Supabase request failed: %s %s %s", method, path, text[:500])
+                    return None
+                if not text:
+                    return None
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return None
+    except aiohttp.ClientError as error:
+        logging.warning("Supabase request error: %s %s %s", method, path, error)
+        return None
+
+
+async def supabase_insert(table: str, payload: dict) -> None:
+    await supabase_request(
+        "POST",
+        f"/rest/v1/{table}",
+        json_body=payload,
+        headers={"Prefer": "return=minimal"},
+    )
+
+
+async def supabase_upsert(table: str, payload: dict, conflict_key: str) -> None:
+    await supabase_request(
+        "POST",
+        f"/rest/v1/{table}?on_conflict={conflict_key}",
+        json_body=payload,
+        headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+    )
+
+
+async def upload_screenshot_to_supabase(telegram_id: int, file_id: str, image_bytes: bytes, mime_type: str) -> Optional[str]:
+    if not supabase_enabled():
+        return None
+
+    extension = "png" if mime_type == "image/png" else "jpg"
+    path = f"{telegram_id}/{uuid.uuid4().hex}-{file_id[:10]}.{extension}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}/{path}",
+                data=image_bytes,
+                headers={
+                    "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                    "Content-Type": mime_type,
+                    "x-upsert": "false",
+                },
+                timeout=30,
+            ) as response:
+                if response.status >= 400:
+                    logging.warning("Supabase storage upload failed: %s", (await response.text())[:500])
+                    return None
+    except aiohttp.ClientError as error:
+        logging.warning("Supabase storage upload error: %s", error)
+        return None
+
+    return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/{path}"
+
+
+async def verify_screenshot_with_groq(image_bytes: bytes, mime_type: str, prompt_id: str, image_url: Optional[str] = None) -> dict:
+    if not GROQ_API_KEY:
+        return {
+            "status": "skipped",
+            "accepted": True,
+            "confidence": 0,
+            "reason": "Groq API key is not configured.",
+        }
+
+    task = PROMPTS.get(prompt_id, {})
+    if image_url:
+        image_source = image_url
+    else:
+        image_base64 = base64.b64encode(image_bytes).decode("ascii")
+        image_source = f"data:{mime_type};base64,{image_base64}"
+    payload = {
+        "model": GROQ_VISION_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You verify screenshots for a Telegram challenge. "
+                    "Return strict JSON only with keys: accepted boolean, confidence number 0..1, reason string. "
+                    "Accept only if the image appears to be a real AI/Mira answer screen or AI chat result related to the task. "
+                    "Reject random photos, unrelated app screenshots, blank screens, memes, and images without visible generated text/result."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Task id: {prompt_id}\n"
+                            f"Task title: {task.get('title', prompt_id)}\n"
+                            f"Task short: {task.get('short', '')}\n"
+                            "Does this screenshot show a real completed result for this task?"
+                        ),
+                    },
+                    {"type": "image_url", "image_url": {"url": image_source}},
+                ],
+            },
+        ],
+        "temperature": 0,
+        "max_completion_tokens": 300,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                timeout=30,
+            ) as response:
+                text = await response.text()
+                if response.status >= 400:
+                    logging.warning("Groq verification failed: %s", text[:500])
+                    return {"status": "error", "accepted": False, "confidence": 0, "reason": "Groq verification failed."}
+                body = json.loads(text)
+                content = body["choices"][0]["message"]["content"]
+                result = json.loads(content)
+                return {
+                    "status": "verified",
+                    "accepted": bool(result.get("accepted")),
+                    "confidence": float(result.get("confidence", 0)),
+                    "reason": str(result.get("reason", ""))[:500],
+                }
+    except (aiohttp.ClientError, KeyError, ValueError, json.JSONDecodeError) as error:
+        logging.warning("Groq verification error: %s", error)
+        return {"status": "error", "accepted": False, "confidence": 0, "reason": "Groq verification error."}
 
 
 async def init_db() -> None:
@@ -174,9 +342,30 @@ async def init_db() -> None:
                 file_type TEXT,
                 caption TEXT,
                 status TEXT,
+                verification_status TEXT,
+                verification_reason TEXT,
+                verification_confidence REAL,
+                screenshot_url TEXT,
                 created_at TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS pending_uploads (
+                telegram_id INTEGER PRIMARY KEY,
+                prompt_id TEXT,
+                created_at TEXT
+            )
+        """)
+        for statement in [
+            "ALTER TABLE submissions ADD COLUMN verification_status TEXT",
+            "ALTER TABLE submissions ADD COLUMN verification_reason TEXT",
+            "ALTER TABLE submissions ADD COLUMN verification_confidence REAL",
+            "ALTER TABLE submissions ADD COLUMN screenshot_url TEXT",
+        ]:
+            try:
+                await db.execute(statement)
+            except aiosqlite.OperationalError:
+                pass
         await db.commit()
 
 
@@ -204,6 +393,17 @@ async def upsert_user(message: Message, source: Optional[str] = None) -> None:
             (user.id, user.username, user.first_name, final_source, now_iso(), now_iso()),
         )
         await db.commit()
+    await supabase_upsert(
+        "users",
+        {
+            "telegram_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "source": final_source,
+            "updated_at": now_iso(),
+        },
+        "telegram_id",
+    )
 
 
 async def get_user_source(telegram_id: int) -> str:
@@ -224,20 +424,105 @@ async def add_event(telegram_id: int, event: str, prompt_id: Optional[str] = Non
             (telegram_id, event, prompt_id, source, json.dumps(meta or {}, ensure_ascii=False), now_iso()),
         )
         await db.commit()
+    await supabase_insert(
+        "events",
+        {
+            "telegram_id": telegram_id,
+            "event": event,
+            "prompt_id": prompt_id,
+            "source": source,
+            "meta": meta or {},
+            "created_at": now_iso(),
+        },
+    )
 
 
-async def save_submission(telegram_id: int, prompt_id: str, file_id: str, file_type: str, caption: Optional[str]) -> None:
+async def set_pending_upload(telegram_id: int, prompt_id: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO submissions (telegram_id, prompt_id, file_id, file_type, caption, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO pending_uploads (telegram_id, prompt_id, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                prompt_id = excluded.prompt_id,
+                created_at = excluded.created_at
             """,
-            (telegram_id, prompt_id, file_id, file_type, caption, "new", now_iso()),
+            (telegram_id, prompt_id, now_iso()),
         )
         await db.commit()
 
-    await add_event(telegram_id, "screenshot_uploaded", prompt_id, {"file_type": file_type})
+
+async def get_pending_upload(telegram_id: int) -> Optional[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT prompt_id FROM pending_uploads WHERE telegram_id = ?", (telegram_id,))
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+
+async def clear_pending_upload(telegram_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM pending_uploads WHERE telegram_id = ?", (telegram_id,))
+        await db.commit()
+
+
+async def save_submission(
+    telegram_id: int,
+    prompt_id: str,
+    file_id: str,
+    file_type: str,
+    caption: Optional[str],
+    status: str,
+    verification: dict,
+    screenshot_url: Optional[str],
+) -> None:
+    created_at = now_iso()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO submissions (
+                telegram_id, prompt_id, file_id, file_type, caption, status,
+                verification_status, verification_reason, verification_confidence, screenshot_url, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                telegram_id,
+                prompt_id,
+                file_id,
+                file_type,
+                caption,
+                status,
+                verification.get("status"),
+                verification.get("reason"),
+                verification.get("confidence"),
+                screenshot_url,
+                created_at,
+            ),
+        )
+        await db.commit()
+
+    await supabase_insert(
+        "submissions",
+        {
+            "telegram_id": telegram_id,
+            "prompt_id": prompt_id,
+            "file_id": file_id,
+            "file_type": file_type,
+            "caption": caption,
+            "status": status,
+            "verification_status": verification.get("status"),
+            "verification_reason": verification.get("reason"),
+            "verification_confidence": verification.get("confidence"),
+            "screenshot_url": screenshot_url,
+            "created_at": created_at,
+        },
+    )
+    await add_event(
+        telegram_id,
+        "screenshot_uploaded" if status == "accepted" else "screenshot_rejected",
+        prompt_id,
+        {"file_type": file_type, "verification": verification, "screenshot_url": screenshot_url},
+    )
 
 
 async def get_stats() -> dict:
@@ -247,7 +532,7 @@ async def get_stats() -> dict:
             "users": "SELECT COUNT(*) FROM users",
             "prompt_sent": "SELECT COUNT(*) FROM events WHERE event IN ('prompt_sent', 'prompt_sent_from_webapp')",
             "done": "SELECT COUNT(*) FROM events WHERE event IN ('done_clicked', 'done_clicked_from_webapp')",
-            "screenshots": "SELECT COUNT(*) FROM submissions",
+            "screenshots": "SELECT COUNT(*) FROM submissions WHERE status IN ('new', 'accepted')",
         }
         for key, query in queries.items():
             cursor = await db.execute(query)
@@ -299,6 +584,7 @@ async def get_leaderboard(limit: int = 10) -> list[tuple]:
             LEFT JOIN (
                 SELECT telegram_id, COUNT(*) AS sub_count
                 FROM submissions
+                WHERE status IN ('new', 'accepted')
                 GROUP BY telegram_id
             ) sub ON sub.telegram_id = u.telegram_id
             ORDER BY points DESC, sub_count DESC, done_count DESC
@@ -398,6 +684,78 @@ async def send_leaderboard_message(message: Message, event_name: str = "leaderbo
         name = f"@{username}" if username else (first_name or f"user_{telegram_id}")
         lines.append(f"{index}. {html.escape(name)} — {points} баллов ({done_count} done, {sub_count} скринов)")
     await message.answer("\n".join(lines))
+
+
+async def download_telegram_file(bot: Bot, file_id: str) -> bytes:
+    file = await bot.get_file(file_id)
+    destination = BytesIO()
+    await bot.download_file(file.file_path, destination)
+    return destination.getvalue()
+
+
+async def resolve_prompt_for_screenshot(message: Message, state: FSMContext) -> Optional[str]:
+    data = await state.get_data()
+    prompt_id = data.get("prompt_id")
+    if prompt_id in PROMPTS:
+        return prompt_id
+
+    user = message.from_user
+    if not user:
+        return None
+    prompt_id = await get_pending_upload(user.id)
+    if prompt_id in PROMPTS:
+        return prompt_id
+    return None
+
+
+async def process_screenshot(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    *,
+    file_id: str,
+    file_type: str,
+    mime_type: str,
+    caption: Optional[str],
+) -> None:
+    user = message.from_user
+    if not user:
+        return
+
+    prompt_id = await resolve_prompt_for_screenshot(message, state)
+    if not prompt_id:
+        await message.answer("Не понял, к какой задаче относится скрин. Нажми «Отправить скрин» в Mini App или в боте и попробуй ещё раз.")
+        await state.clear()
+        return
+
+    await message.answer("Скрин получил. Проверяю, что это реальный результат Mira…")
+    image_bytes = await download_telegram_file(bot, file_id)
+    screenshot_url = await upload_screenshot_to_supabase(user.id, file_id, image_bytes, mime_type)
+    verification = await verify_screenshot_with_groq(image_bytes, mime_type, prompt_id, screenshot_url)
+    accepted = bool(verification.get("accepted"))
+    status = "accepted" if accepted else "rejected"
+    await save_submission(user.id, prompt_id, file_id, file_type, caption, status, verification, screenshot_url)
+    await clear_pending_upload(user.id)
+    await state.clear()
+
+    if accepted:
+        await message.answer(
+            "✅ Скрин засчитан.\n\nТеперь ты участвуешь в подборке лучших результатов дня.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🏆 Leaderboard", callback_data="leaderboard")],
+                    [InlineKeyboardButton(text="🔁 Сделать ещё задачу", callback_data="back")],
+                ]
+            ),
+        )
+        return
+
+    reason = verification.get("reason") or "AI не подтвердил, что это результат выполнения задания."
+    await message.answer(
+        "Скрин получил, но не засчитал.\n\n"
+        f"Причина: {html.escape(str(reason))}\n\n"
+        "Отправь скрин именно с результатом Mira по выбранной задаче."
+    )
 
 
 async def send_main_menu(message: Message) -> None:
@@ -574,6 +932,7 @@ async def cb_upload(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(UploadScreenshot.waiting_for_screenshot)
     await state.update_data(prompt_id=prompt_id)
+    await set_pending_upload(callback.from_user.id, prompt_id)
     await add_event(callback.from_user.id, "upload_requested", prompt_id)
     await callback.message.answer(
         "📸 Отправь сюда скрин результата из Mira.\n\n"
@@ -583,55 +942,34 @@ async def cb_upload(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(UploadScreenshot.waiting_for_screenshot, F.photo)
-async def handle_photo_screenshot(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    prompt_id = data.get("prompt_id")
-    if not prompt_id:
-        await message.answer("Не понял, к какой задаче относится скрин. Нажми /start и попробуй ещё раз.")
-        await state.clear()
-        return
+async def handle_photo_screenshot(message: Message, state: FSMContext, bot: Bot) -> None:
     file_id = message.photo[-1].file_id
-    await save_submission(message.from_user.id, prompt_id, file_id, "photo", message.caption)
-    await state.clear()
-    await message.answer(
-        "🔥 Скрин принял.\n\nТеперь ты участвуешь в подборке лучших результатов дня.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🏆 Leaderboard", callback_data="leaderboard")],
-                [InlineKeyboardButton(text="🔁 Сделать ещё задачу", callback_data="back")],
-            ]
-        ),
+    await process_screenshot(
+        message,
+        state,
+        bot,
+        file_id=file_id,
+        file_type="photo",
+        mime_type="image/jpeg",
+        caption=message.caption,
     )
 
 
 @router.message(UploadScreenshot.waiting_for_screenshot, F.document)
-async def handle_document_screenshot(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    prompt_id = data.get("prompt_id")
-    if not prompt_id:
-        await message.answer("Не понял, к какой задаче относится файл. Нажми /start и попробуй ещё раз.")
-        await state.clear()
-        return
+async def handle_document_screenshot(message: Message, state: FSMContext, bot: Bot) -> None:
     document = message.document
     if not document or not (document.mime_type or "").startswith("image/"):
         await message.answer("Это не похоже на изображение. Отправь скрин как фото или картинку.")
         return
-    await save_submission(message.from_user.id, prompt_id, document.file_id, "document_image", message.caption)
-    await state.clear()
-    await message.answer(
-        "🔥 Скрин принял.\n\nТеперь ты участвуешь в подборке лучших результатов дня.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🏆 Leaderboard", callback_data="leaderboard")],
-                [InlineKeyboardButton(text="🔁 Сделать ещё задачу", callback_data="back")],
-            ]
-        ),
+    await process_screenshot(
+        message,
+        state,
+        bot,
+        file_id=document.file_id,
+        file_type="document_image",
+        mime_type=document.mime_type or "image/png",
+        caption=message.caption,
     )
-
-
-@router.message(UploadScreenshot.waiting_for_screenshot)
-async def handle_wrong_screenshot(message: Message) -> None:
-    await message.answer("Нужно отправить именно скрин: фото или изображение.\n\nПросто прикрепи скрин ответа Mira.")
 
 
 @router.message(F.web_app_data)
@@ -666,6 +1004,7 @@ async def handle_web_app_data(message: Message, state: FSMContext) -> None:
     if action == "upload_requested":
         await state.set_state(UploadScreenshot.waiting_for_screenshot)
         await state.update_data(prompt_id=prompt_id)
+        await set_pending_upload(message.from_user.id, prompt_id)
         await add_event(message.from_user.id, "upload_requested_from_webapp", prompt_id)
         await message.answer(
             "📸 Отправь сюда скрин результата из Mira.\n\n"
@@ -684,6 +1023,11 @@ async def handle_web_app_data(message: Message, state: FSMContext) -> None:
     await message.answer("Неизвестное действие из Mini App. Нажми /start и попробуй ещё раз.")
 
 
+@router.message(UploadScreenshot.waiting_for_screenshot)
+async def handle_wrong_screenshot(message: Message) -> None:
+    await message.answer("Нужно отправить именно скрин: фото или изображение.\n\nПросто прикрепи скрин ответа Mira.")
+
+
 @router.message(F.text == "🏆 Leaderboard")
 async def text_leaderboard(message: Message) -> None:
     await send_leaderboard_message(message)
@@ -692,6 +1036,37 @@ async def text_leaderboard(message: Message) -> None:
 @router.message(F.text == "📊 Статистика")
 async def text_stats(message: Message) -> None:
     await send_stats_message(message)
+
+
+@router.message(F.photo)
+async def loose_photo_screenshot(message: Message, state: FSMContext, bot: Bot) -> None:
+    file_id = message.photo[-1].file_id
+    await process_screenshot(
+        message,
+        state,
+        bot,
+        file_id=file_id,
+        file_type="photo",
+        mime_type="image/jpeg",
+        caption=message.caption,
+    )
+
+
+@router.message(F.document)
+async def loose_document_screenshot(message: Message, state: FSMContext, bot: Bot) -> None:
+    document = message.document
+    if not document or not (document.mime_type or "").startswith("image/"):
+        await message.answer("Я пока понимаю только кнопки и скрины результата.\n\nНажми /start и выбери задачу.")
+        return
+    await process_screenshot(
+        message,
+        state,
+        bot,
+        file_id=document.file_id,
+        file_type="document_image",
+        mime_type=document.mime_type or "image/png",
+        caption=message.caption,
+    )
 
 
 @router.message()
