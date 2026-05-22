@@ -272,13 +272,15 @@ function startCreator() {
   haptic();
   if (sendData({ action: "creator_start" })) {
     showToast("Открываю мастер в боте");
-    closeMiniApp();
+    window.setTimeout(() => {
+      if (tg?.openTelegramLink) {
+        tg.openTelegramLink(CREATE_LINK);
+      }
+      tg?.close?.();
+    }, 350);
     return;
   }
-  showToast("Открой Mini App из Telegram-бота");
-  window.setTimeout(() => {
-    window.open(CREATE_LINK, "_blank", "noopener,noreferrer");
-  }, 700);
+  window.location.href = CREATE_LINK;
 }
 
 document.querySelector("#detail-back").addEventListener("click", () => showScreen("home"));
