@@ -1,4 +1,6 @@
 const tg = window.Telegram?.WebApp;
+const params = new URLSearchParams(window.location.search);
+const campaignId = Number(params.get("campaign_id") || tg?.initDataUnsafe?.start_param?.replace("challenge_", "") || 1) || 1;
 
 // заменить на свою UTM-ссылку
 const MIRA_LINK = "https://t.me/Mira";
@@ -116,6 +118,7 @@ const screens = {
 };
 
 const taskList = document.querySelector("#task-list");
+const campaignBadge = document.querySelector("#campaign-badge");
 const detailTitle = document.querySelector("#detail-title");
 const detailKicker = document.querySelector("#detail-kicker");
 const detailDescription = document.querySelector("#detail-description");
@@ -177,6 +180,7 @@ function showToast(message) {
 }
 
 function renderTasks() {
+  campaignBadge.textContent = campaignId === 1 ? "Mira 2-Minute Challenge" : `Campaign #${campaignId}`;
   taskList.innerHTML = "";
   Object.entries(PROMPTS).forEach(([promptId, prompt], index) => {
     const button = document.createElement("button");
@@ -232,25 +236,31 @@ function openMira() {
 
 function markDone() {
   haptic("success");
-  sendData({ action: "done_clicked", prompt_id: currentPromptId });
+  sendData({ action: "done_clicked", campaign_id: campaignId, prompt_key: currentPromptId });
   showScreen("success");
 }
 
 function requestUpload() {
   haptic();
-  sendData({ action: "upload_requested", prompt_id: currentPromptId });
+  sendData({ action: "upload_requested", campaign_id: campaignId, prompt_key: currentPromptId });
   window.setTimeout(() => tg?.close?.(), 180);
 }
 
 function refreshLeaderboardInBot() {
   haptic();
-  sendData({ action: "leaderboard_opened" });
+  sendData({ action: "leaderboard_opened", campaign_id: campaignId });
   window.setTimeout(() => tg?.close?.(), 180);
 }
 
 function refreshStatsInBot() {
   haptic();
-  sendData({ action: "stats_opened" });
+  sendData({ action: "stats_opened", campaign_id: campaignId });
+  window.setTimeout(() => tg?.close?.(), 180);
+}
+
+function startCreator() {
+  haptic();
+  sendData({ action: "creator_start" });
   window.setTimeout(() => tg?.close?.(), 180);
 }
 
@@ -266,6 +276,10 @@ document.querySelector("#success-home").addEventListener("click", () => showScre
 document.querySelector("#open-leaderboard").addEventListener("click", () => showScreen("leaderboard"));
 document.querySelector("#refresh-leaderboard").addEventListener("click", refreshLeaderboardInBot);
 document.querySelector("#refresh-stats").addEventListener("click", refreshStatsInBot);
+document.querySelector("#start-challenge").addEventListener("click", () => {
+  document.querySelector("#task-list").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+document.querySelector("#create-challenge").addEventListener("click", startCreator);
 navButtons.home.addEventListener("click", () => showScreen("home"));
 navButtons.leaderboard.addEventListener("click", () => showScreen("leaderboard"));
 navButtons.stats.addEventListener("click", () => showScreen("stats"));

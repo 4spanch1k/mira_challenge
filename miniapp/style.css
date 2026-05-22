@@ -135,6 +135,25 @@ h2 {
   line-height: 1.55;
 }
 
+.campaign-badge {
+  display: inline-flex;
+  max-width: 100%;
+  margin: 14px auto 0;
+  padding: 8px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.16);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.engine-actions {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
