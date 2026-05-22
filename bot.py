@@ -1016,6 +1016,7 @@ def challenge_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             first_row,
+            [KeyboardButton(text="Создать челлендж")],
             [KeyboardButton(text="🏆 Leaderboard"), KeyboardButton(text="📊 Статистика")],
         ],
         resize_keyboard=True,
@@ -1239,10 +1240,14 @@ async def edit_participant_tasks(callback: CallbackQuery, campaign_id: int) -> N
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, command: CommandObject) -> None:
+async def cmd_start(message: Message, command: CommandObject, state: FSMContext) -> None:
     source = command.args if command and command.args else "direct"
     await upsert_user(message, source=source)
     campaign_id = DEFAULT_CAMPAIGN_ID
+    if source == "create":
+        await add_event(message.from_user.id, "start", meta={"source": source}, campaign_id=campaign_id)
+        await start_creator_wizard(message, state, message.from_user.id)
+        return
     if source.startswith("challenge_"):
         raw_campaign_id = source.removeprefix("challenge_")
         if raw_campaign_id.isdigit() and await get_campaign(int(raw_campaign_id)):
@@ -1287,6 +1292,12 @@ async def cmd_leaderboard(message: Message) -> None:
 @router.message(Command("campaign_stats"))
 async def cmd_campaign_stats(message: Message) -> None:
     await send_campaign_stats(message)
+
+
+@router.message(Command("create"))
+async def cmd_create(message: Message, state: FSMContext) -> None:
+    await upsert_user(message)
+    await start_creator_wizard(message, state, message.from_user.id)
 
 
 @router.message(Command("admin"))
@@ -1638,6 +1649,12 @@ async def text_leaderboard(message: Message) -> None:
 @router.message(F.text == "📊 Статистика")
 async def text_stats(message: Message) -> None:
     await send_stats_message(message)
+
+
+@router.message(F.text == "Создать челлендж")
+async def text_create_campaign(message: Message, state: FSMContext) -> None:
+    await upsert_user(message)
+    await start_creator_wizard(message, state, message.from_user.id)
 
 
 @router.message(F.photo)

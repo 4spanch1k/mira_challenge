@@ -1,6 +1,8 @@
 const tg = window.Telegram?.WebApp;
 const params = new URLSearchParams(window.location.search);
 const campaignId = Number(params.get("campaign_id") || tg?.initDataUnsafe?.start_param?.replace("challenge_", "") || 1) || 1;
+const BOT_LINK = "https://t.me/mira_challenge_bot";
+const CREATE_LINK = `${BOT_LINK}?start=create`;
 
 // заменить на свою UTM-ссылку
 const MIRA_LINK = "https://t.me/Mira";
@@ -151,11 +153,16 @@ function haptic(type = "impact") {
 }
 
 function sendData(payload) {
-  if (!tg?.sendData) {
+  if (!tg?.sendData || !tg?.initData) {
     showToast("Открыто в браузере: событие не отправлено");
-    return;
+    return false;
   }
   tg.sendData(JSON.stringify(payload));
+  return true;
+}
+
+function closeMiniApp() {
+  window.setTimeout(() => tg?.close?.(), 450);
 }
 
 function showScreen(screenName) {
@@ -242,26 +249,36 @@ function markDone() {
 
 function requestUpload() {
   haptic();
-  sendData({ action: "upload_requested", campaign_id: campaignId, prompt_key: currentPromptId });
-  window.setTimeout(() => tg?.close?.(), 180);
+  if (sendData({ action: "upload_requested", campaign_id: campaignId, prompt_key: currentPromptId })) {
+    closeMiniApp();
+  }
 }
 
 function refreshLeaderboardInBot() {
   haptic();
-  sendData({ action: "leaderboard_opened", campaign_id: campaignId });
-  window.setTimeout(() => tg?.close?.(), 180);
+  if (sendData({ action: "leaderboard_opened", campaign_id: campaignId })) {
+    closeMiniApp();
+  }
 }
 
 function refreshStatsInBot() {
   haptic();
-  sendData({ action: "stats_opened", campaign_id: campaignId });
-  window.setTimeout(() => tg?.close?.(), 180);
+  if (sendData({ action: "stats_opened", campaign_id: campaignId })) {
+    closeMiniApp();
+  }
 }
 
 function startCreator() {
   haptic();
-  sendData({ action: "creator_start" });
-  window.setTimeout(() => tg?.close?.(), 180);
+  if (sendData({ action: "creator_start" })) {
+    showToast("Открываю мастер в боте");
+    closeMiniApp();
+    return;
+  }
+  showToast("Открой Mini App из Telegram-бота");
+  window.setTimeout(() => {
+    window.open(CREATE_LINK, "_blank", "noopener,noreferrer");
+  }, 700);
 }
 
 document.querySelector("#detail-back").addEventListener("click", () => showScreen("home"));
