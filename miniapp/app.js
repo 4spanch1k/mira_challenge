@@ -112,6 +112,7 @@ const screens = {
   detail: document.querySelector("#detail-screen"),
   success: document.querySelector("#success-screen"),
   leaderboard: document.querySelector("#leaderboard-screen"),
+  stats: document.querySelector("#stats-screen"),
 };
 
 const taskList = document.querySelector("#task-list");
@@ -120,6 +121,11 @@ const detailKicker = document.querySelector("#detail-kicker");
 const detailDescription = document.querySelector("#detail-description");
 const promptPreview = document.querySelector("#prompt-preview");
 const toast = document.querySelector("#toast");
+const navButtons = {
+  home: document.querySelector("#nav-home"),
+  leaderboard: document.querySelector("#nav-leaderboard"),
+  stats: document.querySelector("#nav-stats"),
+};
 
 let currentPromptId = "content_plan";
 let toastTimeout;
@@ -153,6 +159,10 @@ function showScreen(screenName) {
   Object.values(screens).forEach((screen) => {
     screen.classList.remove("screen-active");
   });
+  Object.values(navButtons).forEach((button) => {
+    button.classList.remove("nav-button-active");
+  });
+  navButtons[screenName]?.classList.add("nav-button-active");
   screens[screenName].classList.add("screen-active");
   window.scrollTo({ top: 0, behavior: "auto" });
 }
@@ -238,8 +248,15 @@ function refreshLeaderboardInBot() {
   window.setTimeout(() => tg?.close?.(), 180);
 }
 
+function refreshStatsInBot() {
+  haptic();
+  sendData({ action: "stats_opened" });
+  window.setTimeout(() => tg?.close?.(), 180);
+}
+
 document.querySelector("#detail-back").addEventListener("click", () => showScreen("home"));
 document.querySelector("#leaderboard-back").addEventListener("click", () => showScreen("home"));
+document.querySelector("#stats-back").addEventListener("click", () => showScreen("home"));
 document.querySelector("#copy-prompt").addEventListener("click", copyPrompt);
 document.querySelector("#open-mira").addEventListener("click", openMira);
 document.querySelector("#mark-done").addEventListener("click", markDone);
@@ -248,6 +265,10 @@ document.querySelector("#success-upload").addEventListener("click", requestUploa
 document.querySelector("#success-home").addEventListener("click", () => showScreen("home"));
 document.querySelector("#open-leaderboard").addEventListener("click", () => showScreen("leaderboard"));
 document.querySelector("#refresh-leaderboard").addEventListener("click", refreshLeaderboardInBot);
+document.querySelector("#refresh-stats").addEventListener("click", refreshStatsInBot);
+navButtons.home.addEventListener("click", () => showScreen("home"));
+navButtons.leaderboard.addEventListener("click", () => showScreen("leaderboard"));
+navButtons.stats.addEventListener("click", () => showScreen("stats"));
 
 initTelegram();
 renderTasks();

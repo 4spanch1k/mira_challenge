@@ -94,7 +94,38 @@
         </section>
         <button class="primary-button full-width" id="refresh-leaderboard" type="button">Обновить в боте</button>
       </main>
+
+      <main class="screen" id="stats-screen" aria-labelledby="stats-title">
+        <button class="back-button" id="stats-back" type="button" aria-label="Назад">Назад</button>
+        <section class="detail-head">
+          <p class="eyebrow">Stats</p>
+          <h2 id="stats-title">Статистика челленджа</h2>
+          <p class="subtitle">Быстрый срез активности. Реальные данные в боте обновляются через кнопку ниже.</p>
+        </section>
+        <section class="metric-list" aria-label="Статистика">
+          <div class="metric-row"><span>Уже сделали</span><strong>17</strong></div>
+          <div class="metric-row"><span>Скринов в подборке</span><strong>8</strong></div>
+          <div class="metric-row"><span>Задач доступно</span><strong>5</strong></div>
+          <div class="metric-row"><span>Формат</span><strong>2 min</strong></div>
+        </section>
+        <button class="primary-button full-width" id="refresh-stats" type="button">Показать статистику в боте</button>
+      </main>
     </div>
+
+    <nav class="bottom-nav" aria-label="Навигация Mini App">
+      <button class="nav-button nav-button-active" id="nav-home" type="button">
+        <span aria-hidden="true">✦</span>
+        <strong>Задачи</strong>
+      </button>
+      <button class="nav-button" id="nav-leaderboard" type="button">
+        <span aria-hidden="true">🏆</span>
+        <strong>Leaderboard</strong>
+      </button>
+      <button class="nav-button" id="nav-stats" type="button">
+        <span aria-hidden="true">📊</span>
+        <strong>Статистика</strong>
+      </button>
+    </nav>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

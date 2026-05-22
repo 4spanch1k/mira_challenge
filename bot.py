@@ -677,6 +677,10 @@ async def handle_web_app_data(message: Message, state: FSMContext) -> None:
         await send_leaderboard_message(message, "leaderboard_opened_from_webapp")
         return
 
+    if action == "stats_opened":
+        await send_stats_message(message, "stats_opened_from_webapp")
+        return
+
     await message.answer("Неизвестное действие из Mini App. Нажми /start и попробуй ещё раз.")
 
 
